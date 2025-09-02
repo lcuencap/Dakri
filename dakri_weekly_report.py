@@ -222,7 +222,6 @@ def load_data(file):
             continue
         df = pd.read_excel(file, sheet_name=sh, header=0)
 
-        # Choose likely total column (English keywords only)
         # Prefer column immediately to the right of a cell labeled 'TTL' in the first header rows
         ttl_col = None
         header_probe_rows = df.head(3)
