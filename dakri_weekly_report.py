@@ -21,7 +21,7 @@ KG_TO_M_FACTOR = 1.0/1000.0
 # Output unit for the purchase plan: 'kg' or 't' (metric tons) or 'm' (meters)
 OUTPUT_UNIT = "m" if CONVERT_TO_METERS else "kg"
 UNIT_FACTOR = (1.0 if OUTPUT_UNIT == "kg" else (0.001 if OUTPUT_UNIT == "t" else 1.0))
-CAP_MULTIPLIER = 1.25  # coarse cap vs historical max; dynamic caps are also applied
+CAP_MULTIPLIER = 1.05  # stricter cap vs historical max to avoid over-forecasting
 
 # Data cleaning configuration
 # Exclude COVID period (inclusive) from modeling/reporting if set
@@ -38,20 +38,27 @@ def clamp_forecast_to_recent_behavior(history: pd.Series, forecast: pd.Series) -
     forecast = forecast.copy()
     if history.empty:
         return forecast.clip(lower=0)
-    recent = history.tail(48)
+    recent = history.tail(6)
     recent = recent[recent > 0]
     if recent.empty:
         return forecast.clip(lower=0)
     recent_median = float(np.median(recent.values))
     recent_std = float(np.std(recent.values))
-    # Dynamic cap: allow up to median + 3*std, and at least 2x median
-    dyn_cap = max(recent_median * 2.0, recent_median + 3.0 * recent_std)
+    # Dynamic cap: allow up to median + 1*std, and at most 1.25x median
+    dyn_cap = min(recent_median * 1.25, recent_median + 1.0 * recent_std)
     if np.isnan(dyn_cap) or dyn_cap <= 0:
-        dyn_cap = recent_median * 2.0
+        dyn_cap = recent_median * 1.1
     # Also respect global historical cap
     hist_cap = float(np.nanmax(history.values)) * CAP_MULTIPLIER if len(history) else dyn_cap
     cap_value = max(0.0, min(dyn_cap, hist_cap))
-    return forecast.clip(lower=0, upper=cap_value)
+    clamped = forecast.clip(lower=0, upper=cap_value)
+    # Optional: smooth spikes by limiting month-over-month growth to +25% over recent median
+    try:
+        max_step = recent_median * 1.25
+        clamped = clamped.clip(upper=max_step)
+    except Exception:
+        pass
+    return clamped
 
 # =========================
 # MAPEO DE TIPOS
