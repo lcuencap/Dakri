@@ -254,16 +254,52 @@ def load_data(file):
             numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
             ttl_col = numeric_cols[-1] if numeric_cols else df.columns[-1]
 
-        # Robust numeric coercion (handles thousands separators and commas) for ttl column
+        # Robust numeric coercion for mixed separators (supports 1.000, 1,000, 1.000,50, 1,000.50)
+        def _parse_mixed_number(s):
+            if s is None or (isinstance(s, float) and np.isnan(s)):
+                return np.nan
+            s = str(s).strip()
+            if s == "" or s.lower() in {"nan", "none"}:
+                return np.nan
+            s = re.sub(r"[^0-9,.-]", "", s)
+            if "," in s and "." in s:
+                if s.rfind(",") > s.rfind("."):
+                    s2 = s.replace(".", "").replace(",", ".")
+                else:
+                    s2 = s.replace(",", "")
+                try:
+                    return float(s2)
+                except:
+                    return np.nan
+            if "," in s:
+                parts = s.split(",")
+                if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+                    try:
+                        return float(parts[0] + parts[1])
+                    except:
+                        return np.nan
+                try:
+                    return float(parts[0] + "." + parts[-1])
+                except:
+                    return np.nan
+            if "." in s:
+                parts = s.split(".")
+                if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+                    try:
+                        return float(parts[0] + parts[1])
+                    except:
+                        return np.nan
+                try:
+                    return float(s)
+                except:
+                    return np.nan
+            try:
+                return float(s)
+            except:
+                return np.nan
+
         def _to_numeric(series: pd.Series) -> pd.Series:
-            s = series.astype(str).str.replace(r"[^\d,.-]", "", regex=True)
-            num = pd.to_numeric(
-                s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
-                errors="coerce",
-            )
-            if num.isna().all():
-                num = pd.to_numeric(s, errors="coerce")
-            return num
+            return series.apply(_parse_mixed_number)
 
         coerced_ttl = _to_numeric(df[ttl_col])
 
