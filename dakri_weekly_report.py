@@ -247,19 +247,31 @@ def load_data(file):
             numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
             ttl_col = numeric_cols[-1] if numeric_cols else df.columns[-1]
 
-        # Robust numeric coercion (handles thousands separators and commas)
-        cleaned = (
-            df[ttl_col]
-            .astype(str)
-            .str.replace(r"[^\d,.-]", "", regex=True)
-        )
-        coerced = pd.to_numeric(
-            cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
-            errors="coerce",
-        )
-        if coerced.isna().all():
-            coerced = pd.to_numeric(cleaned, errors="coerce")
-        df["_consumption_"] = coerced
+        # Robust numeric coercion (handles thousands separators and commas) for ttl column
+        def _to_numeric(series: pd.Series) -> pd.Series:
+            s = series.astype(str).str.replace(r"[^\d,.-]", "", regex=True)
+            num = pd.to_numeric(
+                s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+                errors="coerce",
+            )
+            if num.isna().all():
+                num = pd.to_numeric(s, errors="coerce")
+            return num
+
+        coerced_ttl = _to_numeric(df[ttl_col])
+
+        # Also compute a per-row maximum across ALL numeric-looking columns as a fallback
+        num_all = pd.DataFrame({c: _to_numeric(df[c]) for c in df.columns})
+        row_max = num_all.max(axis=1, skipna=True)
+
+        # Use the larger of TTL and row_max to avoid undercounting when TTL detection misses
+        totals = coerced_ttl.copy()
+        try:
+            totals = np.where(row_max.fillna(0) > coerced_ttl.fillna(0), row_max, coerced_ttl)
+        except Exception:
+            totals = coerced_ttl
+
+        df["_consumption_"] = pd.to_numeric(totals, errors="coerce")
         # Convert to meters if enabled (per user's rule: m = kg / 1000)
         if CONVERT_TO_METERS:
             df["_consumption_"] = df["_consumption_"] * KG_TO_M_FACTOR

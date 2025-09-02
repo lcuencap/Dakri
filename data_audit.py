@@ -104,11 +104,20 @@ def main() -> int:
                 descr_col_guess = string_cols[0]
 
         ttl_col = find_ttl_column(df)
-        nums = coerce_numeric(df[ttl_col])
+        ttl_nums = coerce_numeric(df[ttl_col])
+        # Fallback: row-wise max of numeric-looking columns to detect hidden totals
+        num_all = pd.DataFrame({c: coerce_numeric(df[c]) for c in df.columns})
+        row_max = num_all.max(axis=1, skipna=True)
 
         for i, row in df.iterrows():
             descr = row.get(descr_col_guess, None)
-            num = nums.iloc[i]
+            num = ttl_nums.iloc[i]
+            # prefer row_max if larger (and not nan)
+            try:
+                if pd.notna(row_max.iloc[i]) and (pd.isna(num) or row_max.iloc[i] > num):
+                    num = row_max.iloc[i]
+            except Exception:
+                pass
             reason = None
             ptype = normalize_type(descr)
             if pd.isna(num) or float(num) == 0:
