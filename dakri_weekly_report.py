@@ -14,9 +14,13 @@ INPUT_FILE = "SUMMARY PAPER CONSO 2016-2025.xlsx"
 OUTPUT_FOLDER = "./reports"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Output unit for the purchase plan: 'kg' or 't' (metric tons)
-OUTPUT_UNIT = "kg"
-UNIT_FACTOR = 0.001 if OUTPUT_UNIT == "t" else 1.0
+# Source data is in kilograms. Optionally convert to meters (kg / 1000 = meters per user's rule).
+CONVERT_TO_METERS = True
+KG_TO_M_FACTOR = 1.0/1000.0
+
+# Output unit for the purchase plan: 'kg' or 't' (metric tons) or 'm' (meters)
+OUTPUT_UNIT = "m" if CONVERT_TO_METERS else "kg"
+UNIT_FACTOR = (1.0 if OUTPUT_UNIT == "kg" else (0.001 if OUTPUT_UNIT == "t" else 1.0))
 CAP_MULTIPLIER = 1.25  # coarse cap vs historical max; dynamic caps are also applied
 
 # Data cleaning configuration
@@ -256,6 +260,9 @@ def load_data(file):
         if coerced.isna().all():
             coerced = pd.to_numeric(cleaned, errors="coerce")
         df["_consumption_"] = coerced
+        # Convert to meters if enabled (per user's rule: m = kg / 1000)
+        if CONVERT_TO_METERS:
+            df["_consumption_"] = df["_consumption_"] * KG_TO_M_FACTOR
 
         # Pick description column: first object dtype column
         # Description column is typically the second column (e.g., 'SIAM-FLUTE'). Fallback to first string column.
@@ -413,6 +420,14 @@ if __name__=="__main__":
         exit()
     monthly = df.groupby(["date","paper_type"])["consumption"].sum().reset_index()
     monthly = filter_covid_and_anomalies(monthly)
+    # Sanity print: recent totals per type (post-cleaning)
+    try:
+        recent_cut = monthly["date"].max() - pd.offsets.MonthBegin(6)
+        recent = monthly[monthly["date"] >= recent_cut]
+        summary = recent.groupby("paper_type")["consumption"].sum().sort_values(ascending=False)
+        print("\nRecent ~6-month totals by type (unit:", OUTPUT_UNIT, ")\n", summary.to_string())
+    except Exception:
+        pass
     today = datetime.today().strftime("%Y-%m-%d")
     out_file = os.path.join(OUTPUT_FOLDER, f"dakri_consumption_report_{today}.pdf")
     # Build 12-month purchase plan (forecast per type)
